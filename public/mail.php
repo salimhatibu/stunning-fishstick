@@ -14,14 +14,31 @@
  */
 require_once __DIR__ . '/../includes/config.php';
 
+// Load email configuration
+$email_config = require_once __DIR__ . '/../includes/email_config.php';
+
 // If using PHPMailer, ensure composer autoload exists:
 if (file_exists(__DIR__ . '/../vendor/autoload.php')) {
     include_once __DIR__ . '/../vendor/autoload.php';
 }
 
-use PHPMailer\PHPMailer\PHPMailer;
-use PHPMailer\PHPMailer\SMTP;
-use PHPMailer\PHPMailer\Exception;
+// Check if PHPMailer classes are available
+$phpmailer_available = class_exists('PHPMailer\\PHPMailer\\PHPMailer');
+
+/**
+ * Simple email sending function using PHP's mail() with headers
+ */
+function sendSimpleEmail($to, $subject, $message, $from_email, $from_name) {
+    $headers = [
+        'From: ' . $from_name . ' <' . $from_email . '>',
+        'Reply-To: ' . $from_email,
+        'X-Mailer: PHP/' . phpversion(),
+        'MIME-Version: 1.0',
+        'Content-Type: text/plain; charset=UTF-8'
+    ];
+    
+    return mail($to, $subject, $message, implode("\r\n", $headers));
+}
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
@@ -392,24 +409,39 @@ $subject = "Welcome to Task App!";
 $bodyPlain = "Hello {$username},\n\nWelcome to our Task App. " .
             "We're glad to have you!";
 
-// Try PHPMailer if available
-if (class_exists('PHPMailer\\PHPMailer\\PHPMailer')) {
+// Try PHPMailer if available and not using PHP mail
+if ($phpmailer_available && !$email_config['use_php_mail']) {
     try {
         $mail = new \PHPMailer\PHPMailer\PHPMailer(true);
+        
+        // Enable debug output if configured
+        if ($email_config['debug']) {
+            $mail->SMTPDebug = \PHPMailer\PHPMailer\SMTP::DEBUG_SERVER;
+        }
+        
         $mail->isSMTP();
 
-        // SMTP settings — replace with your provider's settings
-        $mail->Host = 'smtp.mailtrap.io';
+        // SMTP settings from configuration
+        $mail->Host = $email_config['smtp_host'];
         $mail->SMTPAuth = true;
-        $mail->Username = 'MAILTRAP_USER';
-        $mail->Password = 'MAILTRAP_PASS';
-        $mail->SMTPSecure = \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS;
-        $mail->Port = 2525;
+        $mail->Username = $email_config['smtp_username'];
+        $mail->Password = $email_config['smtp_password'];
+        
+        // Set encryption based on configuration
+        if ($email_config['smtp_secure'] === 'ssl') {
+            $mail->SMTPSecure = \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_SMTPS;
+        } else {
+            $mail->SMTPSecure = \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS;
+        }
+        
+        $mail->Port = $email_config['smtp_port'];
 
-        $mail->setFrom('no-reply@taskapp.com', 'Task App');
+        $mail->setFrom($email_config['from_email'], $email_config['from_name']);
         $mail->addAddress($email, $username);
         $mail->Subject = $subject;
         $mail->Body = $bodyPlain;
+        $mail->isHTML(false); // Plain text email
+        
         $mail->send();
 
         $successMsg = "✅ Registered and welcome email sent to " .
@@ -539,7 +571,7 @@ if (class_exists('PHPMailer\\PHPMailer\\PHPMailer')) {
         <?php
     } catch (Exception $e) {
         // fallback to mail()
-        if (mail($email, $subject, $bodyPlain, "From: no-reply@taskapp.com")) {
+        if (sendSimpleEmail($email, $subject, $bodyPlain, $email_config['from_email'], $email_config['from_name'])) {
             $fallbackMsg = "✅ Registered — email sent with PHP mail() " .
                           "(PHPMailer failed: " .
                           htmlspecialchars($e->getMessage()) . ").";
@@ -752,8 +784,8 @@ if (class_exists('PHPMailer\\PHPMailer\\PHPMailer')) {
         }
     }
 } else {
-    // PHPMailer not installed — use mail() as fallback
-    if (mail($email, $subject, $bodyPlain, "From: no-reply@taskapp.com")) {
+    // PHPMailer not available or use_php_mail is true — use mail() as fallback
+    if (sendSimpleEmail($email, $subject, $bodyPlain, $email_config['from_email'], $email_config['from_name'])) {
         ?>
         <!DOCTYPE html>
         <html lang="en">

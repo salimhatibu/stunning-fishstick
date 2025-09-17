@@ -31,3 +31,4 @@ if ($result->num_rows == 0) {
         // Column might already exist, ignore error
     }
 }
+?>
